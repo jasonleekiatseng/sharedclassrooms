@@ -706,6 +706,15 @@ export default function App() {
         )}
       </main>
 
+      <footer style={{ borderTop: `1px solid ${COLORS.line}`, padding: "18px 20px", textAlign: "center" }}>
+        <a href="/privacy.html" style={{ fontSize: 12.5, color: COLORS.inkSoft, marginRight: 16, textDecoration: "none" }}>
+          Privacy Policy
+        </a>
+        <a href="/terms.html" style={{ fontSize: 12.5, color: COLORS.inkSoft, textDecoration: "none" }}>
+          Terms of Service
+        </a>
+      </footer>
+
       {toast && (
         <div
           style={{
@@ -1616,13 +1625,102 @@ function GoogleAccountPickerMock({ suggestions, onChoose, onClose }) {
   );
 }
 
+// Loads Google's Identity Services script once, cached across mounts.
+let googleScriptPromise = null;
+function loadGoogleScript() {
+  if (googleScriptPromise) return googleScriptPromise;
+  googleScriptPromise = new Promise((resolve, reject) => {
+    if (window.google?.accounts?.id) {
+      resolve();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load Google's sign-in script"));
+    document.head.appendChild(script);
+  });
+  return googleScriptPromise;
+}
+
+// The real "Sign in with Google" button, used once VITE_GOOGLE_CLIENT_ID is
+// configured. Google's script renders its own genuine button here; on
+// sign-in it hands back a signed ID token, which gets sent to the
+// verify-google-signin Netlify function — never trusted on its own, since
+// anything read client-side without checking the signature could be faked.
+function RealGoogleSignInButton({ clientId, onVerifiedEmail, onError }) {
+  const buttonRef = React.useRef(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadGoogleScript()
+      .then(() => {
+        if (cancelled) return;
+        window.google.accounts.id.initialize({
+          client_id: clientId,
+          callback: async (response) => {
+            try {
+              const res = await fetch("/.netlify/functions/verify-google-signin", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id_token: response.credential }),
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                onError(data.error || "Sign-in could not be verified.");
+                return;
+              }
+              onVerifiedEmail(data.email);
+            } catch (e) {
+              console.error("google verify error", e);
+              onError("Could not verify sign-in — check your connection and try again.");
+            }
+          },
+        });
+        if (buttonRef.current) {
+          window.google.accounts.id.renderButton(buttonRef.current, {
+            theme: "outline",
+            size: "large",
+            text: "signin_with",
+            width: 280,
+          });
+        }
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error(e);
+        onError("Could not load Google's sign-in button — check your connection and try again.");
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
+
+  return (
+    <div style={{ display: "flex", justifyContent: "center" }}>
+      {loading && <div className="sc-form-note">Loading Google sign-in…</div>}
+      <div ref={buttonRef} />
+    </div>
+  );
+}
+
 function ManageListing({ centers, listings, updateCenterInfo, updateListingInfo, showToast }) {
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const [googleEmail, setGoogleEmail] = useState(null); // the "signed in" Google account email
   const [pickerOpen, setPickerOpen] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [verifyError, setVerifyError] = useState("");
 
   const handleSignedIn = (email) => {
     setPickerOpen(false);
+    setVerifyError("");
     setGoogleEmail(email);
     const match = centers.find((c) => (c.email || "").trim().toLowerCase() === email.trim().toLowerCase());
     setNotFound(!match);
@@ -1631,6 +1729,7 @@ function ManageListing({ centers, listings, updateCenterInfo, updateListingInfo,
   const signOut = () => {
     setGoogleEmail(null);
     setNotFound(false);
+    setVerifyError("");
   };
 
   const center = googleEmail ? centers.find((c) => (c.email || "").trim().toLowerCase() === googleEmail.trim().toLowerCase()) : null;
@@ -1646,10 +1745,24 @@ function ManageListing({ centers, listings, updateCenterInfo, updateListingInfo,
         <div className="sc-form-panel" style={{ textAlign: "center" }}>
           {!googleEmail ? (
             <>
-              <GoogleSignInButton onClick={() => setPickerOpen(true)} />
+              {googleClientId ? (
+                <RealGoogleSignInButton clientId={googleClientId} onVerifiedEmail={handleSignedIn} onError={setVerifyError} />
+              ) : (
+                <GoogleSignInButton onClick={() => setPickerOpen(true)} />
+              )}
+              {verifyError && (
+                <p className="sc-form-note" style={{ color: COLORS.danger, marginTop: 12 }}>
+                  {verifyError}
+                </p>
+              )}
               <p className="sc-form-note" style={{ marginTop: 16 }}>
                 We only ever see the email address on your Google account — never your Google password.
               </p>
+              {!googleClientId && (
+                <p className="sc-form-note" style={{ marginTop: 4 }}>
+                  (Preview mode: showing a design mock since no Google Client ID is configured yet.)
+                </p>
+              )}
             </>
           ) : (
             notFound && (
