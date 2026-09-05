@@ -1779,10 +1779,11 @@ function ManageListing({ centers, listings, updateCenterInfo, updateListingInfo,
           )}
         </div>
         <p className="sc-form-note" style={{ marginTop: 12 }}>
-          Preview note: this mocks the Google Sign-In interaction for design review. Wiring it to real Google
-          accounts needs a one-time OAuth setup in Google Cloud Console before it goes live.
+          {googleClientId
+            ? "Signed in with your real Google account, verified server-side before we trust the email it returns."
+            : "Preview note: this mocks the Google Sign-In interaction for design review. Wiring it to real Google accounts needs a one-time OAuth setup in Google Cloud Console before it goes live."}
         </p>
-        {pickerOpen && (
+        {!googleClientId && pickerOpen && (
           <GoogleAccountPickerMock
             suggestions={centers.map((c) => c.email).filter(Boolean)}
             onChoose={handleSignedIn}
