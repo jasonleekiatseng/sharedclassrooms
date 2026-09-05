@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Single-page app: any path that isn't a real file falls back to index.html
+# so client-side routing (and plain refreshes on non-root URLs) don't 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
