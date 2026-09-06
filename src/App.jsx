@@ -911,6 +911,27 @@ function ListingCard({ listing, onInquire }) {
   );
 }
 
+// A freely-editable status a center owner can toggle anytime — this is a
+// personal tracking tool ("who have I reached out to, who's a maybe"), not
+// a locked one-way decision. The old "confirmed" value is kept as an alias
+// so records saved before this change still render correctly.
+const INQUIRY_STATUS_OPTIONS = [
+  { value: "pending", label: "New — not yet reviewed" },
+  { value: "contacted", label: "Contacted" },
+  { value: "kiv", label: "KIV (keeping in view)" },
+  { value: "confirmed_lease", label: "Confirmed lease" },
+  { value: "declined", label: "Declined" },
+];
+
+const INQUIRY_STATUS_META = {
+  pending: { label: "New — not yet reviewed", bg: COLORS.brassSoft, fg: COLORS.brass },
+  contacted: { label: "Contacted", bg: COLORS.line, fg: COLORS.ink },
+  kiv: { label: "KIV (keeping in view)", bg: COLORS.brassSoft, fg: COLORS.brass },
+  confirmed_lease: { label: "Confirmed lease", bg: COLORS.chalkSoft, fg: COLORS.chalk },
+  confirmed: { label: "Confirmed lease", bg: COLORS.chalkSoft, fg: COLORS.chalk }, // legacy alias
+  declined: { label: "Declined", bg: COLORS.dangerSoft, fg: COLORS.danger },
+};
+
 const COMMITMENT_OPTIONS = [
   { value: "1_month", label: "1 month (trial)" },
   { value: "3_months", label: "3 months" },
@@ -2343,22 +2364,20 @@ function ManageListingSection({ listing, inquiries, setInquiryStatus, updateList
 
       <h3 className="sc-form-subheading">Booking requests</h3>
       <p className="sc-form-hint">
-        The decision to confirm or decline is yours — you know your own scheduling conflicts and who you want
-        teaching in your space. SharedClassrooms just passes the request along and keeps a record of it.
+        Use this as your own tracking note — mark who you've reached out to, who's a maybe, who you've agreed to
+        lease to. It's freely editable anytime, not a one-way decision. It doesn't change your listing's
+        advertised availability or your Google Calendar automatically — coordinate the actual schedule directly
+        with the tutor for now. (A proper "Confirm" action that updates availability and your calendar directly
+        is planned for a future update.)
       </p>
       {inquiries.length === 0 && <p className="sc-form-note">No requests for this classroom yet.</p>}
       {inquiries.map((i) => {
-        const statusBadge =
-          i.status === "confirmed"
-            ? { text: "Confirmed", bg: COLORS.chalkSoft, fg: COLORS.chalk }
-            : i.status === "declined"
-            ? { text: "Declined", bg: COLORS.dangerSoft, fg: COLORS.danger }
-            : { text: "Awaiting your decision", bg: COLORS.brassSoft, fg: COLORS.brass };
+        const meta = INQUIRY_STATUS_META[i.status] || INQUIRY_STATUS_META.pending;
         return (
           <div key={i.id} style={{ border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: 12, marginBottom: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
               <div style={{ fontWeight: 700, fontSize: 13.5 }}>{i.tutorName}</div>
-              <Badge label={statusBadge.text} bg={statusBadge.bg} fg={statusBadge.fg} />
+              <Badge label={meta.label} bg={meta.bg} fg={meta.fg} />
             </div>
             <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 4 }}>{i.tutorContact}</div>
             <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 2 }}>{i.slots ? slotSummary(i.slots) : `${i.date} ${i.start} · ${i.durationHours}h`}</div>
@@ -2368,16 +2387,19 @@ function ManageListingSection({ listing, inquiries, setInquiryStatus, updateList
               </div>
             )}
             {i.notes && <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 4, fontStyle: "italic" }}>"{i.notes}"</div>}
-            {i.status === "pending" && (
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <Button variant="accent" onClick={() => setInquiryStatus(i.id, "confirmed")}>
-                  Confirm
-                </Button>
-                <Button variant="ghost" onClick={() => setInquiryStatus(i.id, "declined")}>
-                  Decline
-                </Button>
-              </div>
-            )}
+            <div style={{ marginTop: 10, maxWidth: 220 }}>
+              <select
+                style={{ ...inputStyle, fontSize: 13 }}
+                value={i.status === "confirmed" ? "confirmed_lease" : i.status}
+                onChange={(e) => setInquiryStatus(i.id, e.target.value)}
+              >
+                {INQUIRY_STATUS_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         );
       })}
@@ -2456,8 +2478,8 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
 
       <Section title={`Inquiries logged (${inquiries.length})`}>
         <p style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: -4, marginBottom: 12 }}>
-          Read-only — confirming or declining a booking is the center owner's call, made from their own Manage
-          Listing screen. This view is for tracking activity, e.g. as evidence of inquiry volume per listing.
+          Read-only — this status is the center owner's own tracking note, set from their Manage Listing screen.
+          This view is for monitoring activity, e.g. as evidence of inquiry volume per listing.
         </p>
         {inquiries.length === 0 && <Empty text="No inquiries logged yet." />}
         {inquiries
@@ -2466,17 +2488,12 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
           .map((i) => {
             const listing = listings.find((l) => l.id === i.listingId);
             const center = listing ? centerById(listing.centerId) : null;
-            const statusBadge =
-              i.status === "confirmed"
-                ? { text: "Confirmed", bg: COLORS.chalkSoft, fg: COLORS.chalk }
-                : i.status === "declined"
-                ? { text: "Declined", bg: COLORS.dangerSoft, fg: COLORS.danger }
-                : { text: "Awaiting center's decision", bg: COLORS.brassSoft, fg: COLORS.brass };
+            const meta = INQUIRY_STATUS_META[i.status] || INQUIRY_STATUS_META.pending;
             return (
               <div key={i.id} style={{ border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: 12, marginBottom: 8, fontSize: 13 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
                   <div style={{ fontWeight: 700 }}>{i.tutorName}</div>
-                  <Badge label={statusBadge.text} bg={statusBadge.bg} fg={statusBadge.fg} />
+                  <Badge label={meta.label} bg={meta.bg} fg={meta.fg} />
                 </div>
                 <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
                   {center?.centerName} — {listing?.roomName} · {i.tutorContact}
@@ -2703,6 +2720,7 @@ function ListFormStyle() {
       .sc-form-report-tips li { font-size: 13.5px; color: ${COLORS.inkSoft}; line-height: 1.5; }
       .sc-form-success-score { margin-top: 16px; font-size: 14px; color: ${COLORS.ink}; }
       .sc-form-hint { color: ${COLORS.inkSoft}; font-size: 13px; margin: -12px 0 20px; }
+      .sc-form-subheading + .sc-form-hint { margin-top: 6px; }
       .sc-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; margin-bottom: 4px; }
       .sc-form-note { font-size: 12.5px; color: ${COLORS.inkSoft}; margin-top: 6px; }
       .sc-form-remove { border: none; background: none; color: ${COLORS.danger}; font-size: 13px; cursor: pointer; padding: 4px 0; margin-top: 8px; }
