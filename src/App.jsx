@@ -479,7 +479,7 @@ function AmenityPicker({ amenities, onToggle }) {
 
 // ================= APP =================
 export default function App() {
-  const [tab, setTab] = useState("browse");
+  const [tab, setTab] = useState("home");
   const [centers, setCenters] = useState([]);
   const [listings, setListings] = useState([]);
   const [inquiries, setInquiries] = useState([]);
@@ -646,6 +646,7 @@ export default function App() {
           </div>
           <nav style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {[
+              ["home", "Home"],
               ["browse", "Browse rooms"],
               ["list", "List your space"],
               ["manage", "Manage listing"],
@@ -676,6 +677,8 @@ export default function App() {
       <main style={{ maxWidth: 1040, margin: "0 auto", padding: "28px 20px 80px" }}>
         {loading ? (
           <div style={{ padding: 40, color: COLORS.inkSoft }}>Loading…</div>
+        ) : tab === "home" ? (
+          <Welcome onNavigate={setTab} />
         ) : tab === "browse" ? (
           <Browse listings={visibleListings} onInquire={addInquiry} showToast={showToast} />
         ) : tab === "list" ? (
@@ -738,6 +741,62 @@ export default function App() {
           {toast}
         </div>
       )}
+    </div>
+  );
+}
+
+// ================= WELCOME =================
+function Welcome({ onNavigate }) {
+  const roles = [
+    {
+      title: "I'm a tutor looking for a classroom",
+      description:
+        "Browse verified classrooms by location, price, and available time slots, then send a booking request directly to the center — including recurring weekly slots if you're planning a longer-term arrangement.",
+      buttonLabel: "Browse rooms",
+      tab: "browse",
+    },
+    {
+      title: "My tuition center has spare classroom time",
+      description:
+        "List your space in a few minutes. Every new listing is visited and verified in person before it goes live, so tutors can trust what they see.",
+      buttonLabel: "List your space",
+      tab: "list",
+    },
+    {
+      title: "I've already listed my center here",
+      description:
+        "Sign in with the Google account you registered with to update your details, add another classroom, or review booking requests from tutors.",
+      buttonLabel: "Manage listing",
+      tab: "manage",
+    },
+  ];
+
+  return (
+    <div>
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: 28, margin: "0 0 8px", fontFamily: SERIF, fontWeight: 600 }}>Welcome to SharedClassrooms</h1>
+        <p style={{ color: COLORS.inkSoft, margin: 0, fontSize: 14.5, maxWidth: 560 }}>
+          A marketplace connecting tuition centers' spare classroom time with tutors who need occasional or
+          long-term group class space, in Singapore. Every listing is physically visited and verified before it
+          goes live.
+        </p>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        {roles.map((r) => (
+          <div key={r.tab} style={{ border: `1px solid ${COLORS.line}`, borderRadius: 6, background: COLORS.panel, padding: 20 }}>
+            <div style={{ fontWeight: 700, fontSize: 16, fontFamily: SERIF, marginBottom: 6 }}>{r.title}</div>
+            <p style={{ color: COLORS.inkSoft, fontSize: 13.5, margin: "0 0 14px", maxWidth: 640 }}>{r.description}</p>
+            <Button variant="accent" onClick={() => onNavigate(r.tab)}>
+              {r.buttonLabel}
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      <p style={{ color: COLORS.inkSoft, fontSize: 12.5, marginTop: 24 }}>
+        SharedClassrooms team? Admin tools are under the <strong>Admin</strong> tab above.
+      </p>
     </div>
   );
 }
