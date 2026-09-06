@@ -89,3 +89,32 @@ export async function patchInquiry(id, patch) {
   if (error) throw error;
   return merged;
 }
+
+// ---------- Classroom photos (Supabase Storage) ----------
+// Real files in a public bucket, replacing the earlier stopgap of
+// embedding a compressed image directly inside each listing's row — this
+// is the version that actually supports more than one photo per classroom
+// without bloating the database.
+const PHOTOS_BUCKET = "classroom-photos";
+
+export async function uploadClassroomPhoto(blob) {
+  const path = `${uid()}.jpg`;
+  const { error } = await supabase.storage.from(PHOTOS_BUCKET).upload(path, blob, {
+    contentType: "image/jpeg",
+    upsert: false,
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from(PHOTOS_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function deleteClassroomPhoto(publicUrl) {
+  // Extract the storage path from the public URL rather than assuming a
+  // fixed prefix, so this keeps working even if the project's URL changes.
+  const marker = `/object/public/${PHOTOS_BUCKET}/`;
+  const idx = publicUrl.indexOf(marker);
+  if (idx === -1) return; // not a URL from this bucket — nothing to delete
+  const path = publicUrl.slice(idx + marker.length);
+  const { error } = await supabase.storage.from(PHOTOS_BUCKET).remove([path]);
+  if (error) throw error;
+}

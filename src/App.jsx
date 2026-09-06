@@ -9,6 +9,8 @@ import {
   patchCenter,
   patchListing,
   patchInquiry,
+  uploadClassroomPhoto,
+  deleteClassroomPhoto,
 } from "./lib/db";
 
 /**
@@ -152,7 +154,7 @@ const emptyClassroom = () => ({
   deposit: "",
   additionalFees: "",
   amenities: [],
-  photoUrl: "",
+  photos: [],
   expanded: true,
   toiletType: "",
 });
@@ -798,18 +800,49 @@ function Browse({ listings, onInquire, showToast }) {
   );
 }
 
+function PhotoCarousel({ photos, alt }) {
+  const [index, setIndex] = useState(0);
+  if (!photos || photos.length === 0) {
+    return (
+      <div style={{ height: 120, background: `linear-gradient(135deg, ${COLORS.brass}33, ${COLORS.chalk}22)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: COLORS.inkSoft }}>
+        No photo uploaded
+      </div>
+    );
+  }
+  return (
+    <div style={{ position: "relative", height: 120 }}>
+      <img src={photos[index]} alt={alt} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+      {photos.length > 1 && (
+        <>
+          <button
+            type="button"
+            onClick={() => setIndex((i) => (i - 1 + photos.length) % photos.length)}
+            style={{ position: "absolute", left: 6, top: "50%", transform: "translateY(-50%)", background: "rgba(28,43,58,0.55)", color: "#fff", border: "none", borderRadius: "50%", width: 24, height: 24, cursor: "pointer", fontSize: 13, lineHeight: 1 }}
+          >
+            ‹
+          </button>
+          <button
+            type="button"
+            onClick={() => setIndex((i) => (i + 1) % photos.length)}
+            style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "rgba(28,43,58,0.55)", color: "#fff", border: "none", borderRadius: "50%", width: 24, height: 24, cursor: "pointer", fontSize: 13, lineHeight: 1 }}
+          >
+            ›
+          </button>
+          <div style={{ position: "absolute", bottom: 6, left: 0, right: 0, textAlign: "center", fontSize: 11, color: "#fff", textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}>
+            {index + 1} / {photos.length}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ListingCard({ listing, onInquire }) {
   const badge = AUDIT_LABEL[listing.auditStatus];
   const availability = scheduleSummary(listing.schedule);
   return (
     <div style={{ border: `1px solid ${COLORS.line}`, borderRadius: 6, background: COLORS.panel, overflow: "hidden" }}>
-      <div style={{ height: 120, background: `linear-gradient(135deg, ${COLORS.brass}33, ${COLORS.chalk}22)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: COLORS.inkSoft }}>
-        {listing.photoUrl ? (
-          <img src={listing.photoUrl} alt={listing.roomName} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-        ) : (
-          "No photo uploaded"
-        )}
-      </div>
+      <PhotoCarousel photos={listing.photos} alt={listing.roomName} />
       <div style={{ padding: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
@@ -917,11 +950,9 @@ function InquiryModal({ listing, onClose, onSubmit }) {
 }
 
 // Reads a selected image file, downscales it, and returns a compressed
-// JPEG data URL — lets photos be uploaded directly with no backend, since
-// the resulting string is stored as the photo itself rather than a link to
-// one. Deliberately modest dimensions/quality to keep each photo small,
-// since the whole listings list is saved as a single storage entry.
-function compressImageFile(file, maxDim = 480, quality = 0.6) {
+// JPEG Blob ready to upload to Supabase Storage. Deliberately modest
+// dimensions/quality so uploads stay fast on a phone connection.
+function compressImageFile(file, maxDim = 1200, quality = 0.75) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(reader.error || new Error("Could not read file"));
@@ -941,7 +972,11 @@ function compressImageFile(file, maxDim = 480, quality = 0.6) {
         canvas.width = width;
         canvas.height = height;
         canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error("Could not process image"))),
+          "image/jpeg",
+          quality
+        );
       };
       img.src = reader.result;
     };
@@ -949,40 +984,62 @@ function compressImageFile(file, maxDim = 480, quality = 0.6) {
   });
 }
 
-function PhotoUploadField({ value, onChange }) {
+// Multiple photos per classroom, backed by real files in Supabase Storage
+// rather than data embedded in the row — this is what actually supports
+// more than one photo without bloating a single database record.
+function MultiPhotoUploadField({ photos, onChange }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const inputRef = React.useRef(null);
 
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
     setBusy(true);
     setError("");
     try {
-      const dataUrl = await compressImageFile(file);
-      onChange(dataUrl);
+      const uploaded = [];
+      for (const file of files) {
+        const blob = await compressImageFile(file);
+        const url = await uploadClassroomPhoto(blob);
+        uploaded.push(url);
+      }
+      onChange([...photos, ...uploaded]);
     } catch (err) {
-      console.error("photo compress error", err);
-      setError("Couldn't read that photo — try a different file.");
+      console.error("photo upload error", err);
+      setError("Couldn't upload one or more photos — check your connection and try again.");
     }
     setBusy(false);
     if (inputRef.current) inputRef.current.value = "";
   };
 
+  const removePhoto = async (url) => {
+    onChange(photos.filter((p) => p !== url));
+    try {
+      await deleteClassroomPhoto(url);
+    } catch (err) {
+      // Not fatal — the photo's already removed from this listing either way.
+      console.error("photo delete error", err);
+    }
+  };
+
   return (
     <div className="sc-form-photo">
-      {value && (
-        <div className="sc-form-photo-preview">
-          <img src={value} alt="Classroom" />
-          <button type="button" className="sc-form-remove" onClick={() => onChange("")}>
-            Remove photo
-          </button>
+      {photos.length > 0 && (
+        <div className="sc-form-photo-grid">
+          {photos.map((url) => (
+            <div className="sc-form-photo-thumb" key={url}>
+              <img src={url} alt="Classroom" />
+              <button type="button" className="sc-form-photo-remove" onClick={() => removePhoto(url)} title="Remove photo">
+                ×
+              </button>
+            </div>
+          ))}
         </div>
       )}
       <label className="sc-form-photo-upload">
-        <input ref={inputRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-        {busy ? "Processing…" : value ? "Replace photo" : "Choose photo"}
+        <input ref={inputRef} type="file" accept="image/*" multiple onChange={handleFiles} style={{ display: "none" }} />
+        {busy ? "Uploading…" : "Add photos"}
       </label>
       {error && <div className="sc-form-note" style={{ color: COLORS.danger }}>{error}</div>}
     </div>
@@ -1141,7 +1198,7 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
         additionalFees: c.additionalFees,
         amenities: c.amenities,
         toiletType: c.toiletType,
-        photoUrl: c.photoUrl,
+        photos: c.photos,
         readinessScoreAtSubmission: readiness.overall,
         addressMatchWarning,
       });
@@ -1383,8 +1440,8 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
                           <input placeholder="e.g. cleaning, maintenance" value={c.additionalFees} onChange={(e) => updateClassroom(c.id, "additionalFees", e.target.value)} />
                         </Field>
 
-                        <Field label="Photo (optional)" hint="A phone photo is fine — it's compressed automatically. Just a representative shot for now; we'll capture the full site tour at audit.">
-                          <PhotoUploadField value={c.photoUrl} onChange={(dataUrl) => updateClassroom(c.id, "photoUrl", dataUrl)} />
+                        <Field label="Photos (optional)" hint="Add as many as you'd like — phone photos are fine, they're compressed automatically. Just representative shots for now; we'll capture the full site tour at audit.">
+                          <MultiPhotoUploadField photos={c.photos} onChange={(photos) => updateClassroom(c.id, "photos", photos)} />
                         </Field>
 
                         {classrooms.length > 1 && (
@@ -1930,7 +1987,7 @@ function ManageListingSection({ listing, updateListingInfo, showToast }) {
     hasDeposit: listing.hasDeposit,
     deposit: listing.deposit,
     additionalFees: listing.additionalFees,
-    photoUrl: listing.photoUrl,
+    photos: listing.photos || [],
   });
   const [physForm, setPhysForm] = useState({
     capacity: listing.capacity,
@@ -2002,8 +2059,8 @@ function ManageListingSection({ listing, updateListingInfo, showToast }) {
       <Field label="Additional fees (optional)">
         <input value={selfForm.additionalFees} onChange={(e) => updateSelf("additionalFees", e.target.value)} />
       </Field>
-      <Field label="Photo (optional)">
-        <PhotoUploadField value={selfForm.photoUrl} onChange={(dataUrl) => updateSelf("photoUrl", dataUrl)} />
+      <Field label="Photos (optional)">
+        <MultiPhotoUploadField photos={selfForm.photos} onChange={(photos) => updateSelf("photos", photos)} />
       </Field>
       <button type="button" className="sc-form-btn" onClick={saveSelf}>
         Save these details
@@ -2487,14 +2544,32 @@ function ListFormStyle() {
         cursor: pointer;
       }
       .sc-form-amenity-items .sc-form-check:last-child { margin-bottom: 0; }
-      .sc-form-photo { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
-      .sc-form-photo-preview { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-      .sc-form-photo-preview img {
-        width: 160px;
-        height: 110px;
+      .sc-form-photo { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+      .sc-form-photo-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+      .sc-form-photo-thumb { position: relative; width: 110px; height: 88px; }
+      .sc-form-photo-thumb img {
+        width: 100%;
+        height: 100%;
         object-fit: cover;
         border-radius: 4px;
         border: 1px solid ${COLORS.line};
+      }
+      .sc-form-photo-remove {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        border: none;
+        background: ${COLORS.danger};
+        color: #fff;
+        font-size: 13px;
+        line-height: 1;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
       .sc-form-photo-upload {
         display: inline-block;
