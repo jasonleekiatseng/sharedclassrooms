@@ -910,55 +910,174 @@ function ListingCard({ listing, onInquire }) {
   );
 }
 
+const COMMITMENT_OPTIONS = [
+  { value: "1_month", label: "1 month (trial)" },
+  { value: "3_months", label: "3 months" },
+  { value: "6_months", label: "6 months" },
+  { value: "9_months", label: "9 months" },
+  { value: "12_months", label: "12 months" },
+  { value: "ongoing", label: "Ongoing — not sure yet" },
+];
+
+function slotDurationHours(from, to) {
+  if (!from || !to) return null;
+  const [fh, fm] = from.split(":").map(Number);
+  const [th, tm] = to.split(":").map(Number);
+  return (th * 60 + tm - (fh * 60 + fm)) / 60;
+}
+
+// Soft check only — the listing's own advertised hours are a reference
+// point, not a hard boundary, since real availability is often more
+// flexible than what's on file and this is exactly the kind of thing a
+// tutor and center can sort out directly.
+function slotAvailabilityWarning(listing, day, from, to) {
+  const daySchedule = listing.schedule?.[day];
+  if (!daySchedule?.on) {
+    return `${listing.roomName} isn't listed as available on ${day}s — worth confirming with the center directly.`;
+  }
+  if (from && to && (from < daySchedule.from || to > daySchedule.to)) {
+    return `This falls outside ${listing.roomName}'s advertised ${day} hours (${daySchedule.from}–${daySchedule.to}) — worth confirming with the center directly.`;
+  }
+  return null;
+}
+
+function slotSummary(slots) {
+  return slots.map((s) => `${s.day} ${s.from}–${s.to}`).join(", ");
+}
+
 function InquiryModal({ listing, onClose, onSubmit }) {
   const minHours = formatMinBooking(listing);
-  const durationOptions = [minHours, minHours + 1, minHours + 2, minHours + 3];
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
-  const [date, setDate] = useState("");
-  const [start, setStart] = useState("15:00");
-  const [duration, setDuration] = useState(minHours);
+  const [startDate, setStartDate] = useState("");
+  const [commitmentLength, setCommitmentLength] = useState("3_months");
+  const [slots, setSlots] = useState([{ id: uid(), day: "Mon", from: "", to: "" }]);
   const [notes, setNotes] = useState("");
+  const [errors, setErrors] = useState({});
+
+  const updateSlot = (id, field, value) =>
+    setSlots((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
+
+  const addSlot = () => setSlots((prev) => [...prev, { id: uid(), day: "Mon", from: "", to: "" }]);
+
+  const removeSlot = (id) => setSlots((prev) => (prev.length > 1 ? prev.filter((s) => s.id !== id) : prev));
 
   const submit = () => {
-    if (!name || !contact || !date) return;
-    onSubmit({ tutorName: name, tutorContact: contact, date, start, durationHours: duration, notes });
+    const next = {};
+    if (!name.trim()) next.name = "Required";
+    if (!contact.trim()) next.contact = "Required";
+    if (!startDate) next.startDate = "Required";
+
+    const slotErrors = {};
+    slots.forEach((s) => {
+      if (!s.from || !s.to) {
+        slotErrors[s.id] = "Set both a start and end time";
+        return;
+      }
+      const dur = slotDurationHours(s.from, s.to);
+      if (dur <= 0) slotErrors[s.id] = "End time must be after start time";
+      else if (dur < minHours) slotErrors[s.id] = `Minimum booking for this room is ${minHours} hours — this slot is only ${dur}h`;
+    });
+    if (Object.keys(slotErrors).length) next.slots = slotErrors;
+
+    setErrors(next);
+    if (Object.keys(next).length) return;
+
+    onSubmit({
+      tutorName: name,
+      tutorContact: contact,
+      startDate,
+      commitmentLength,
+      slots: slots.map(({ day, from, to }) => ({ day, from, to })),
+      notes,
+    });
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(28,43,58,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50 }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 8, padding: 24, maxWidth: 420, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(28,43,58,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, zIndex: 50, overflowY: "auto" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 8, padding: 24, maxWidth: 480, width: "100%", margin: "20px 0" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 2, fontFamily: SERIF }}>Request to book</div>
         <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 16 }}>
           {listing.roomName} · {listing.center?.centerName}
         </div>
-        <Field label="Your name">
+
+        <Field label="Your name" error={errors.name}>
           <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="Phone or email">
+        <Field label="Phone or email" error={errors.contact}>
           <input style={inputStyle} value={contact} onChange={(e) => setContact(e.target.value)} />
         </Field>
+
         <div style={{ display: "flex", gap: 10 }}>
           <div style={{ flex: 1 }}>
-            <Field label="Date">
-              <input type="date" style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} />
+            <Field label="Preferred start date" error={errors.startDate}>
+              <input type="date" style={inputStyle} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </Field>
           </div>
           <div style={{ flex: 1 }}>
-            <Field label="Start time">
-              <input type="time" style={inputStyle} value={start} onChange={(e) => setStart(e.target.value)} />
+            <Field label="How long do you plan to book for?">
+              <select style={inputStyle} value={commitmentLength} onChange={(e) => setCommitmentLength(e.target.value)}>
+                {COMMITMENT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             </Field>
           </div>
         </div>
-        <Field label="Duration" hint={`Minimum booking for this room is ${minHours} hours.`}>
-          <select style={inputStyle} value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-            {durationOptions.map((d) => (
-              <option key={d} value={d}>
-                {d} hours
-              </option>
-            ))}
-          </select>
-        </Field>
+
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: COLORS.inkSoft, margin: "4px 0 8px" }}>
+          Weekly time slots — add one row per recurring slot you'd like (e.g. every Monday 3–6pm).
+        </div>
+        {slots.map((s, idx) => {
+          const warning = s.from && s.to ? slotAvailabilityWarning(listing, s.day, s.from, s.to) : null;
+          const err = errors.slots?.[s.id];
+          return (
+            <div key={s.id} style={{ marginBottom: 10, padding: 10, border: `1px solid ${COLORS.line}`, borderRadius: 4 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11.5, color: COLORS.inkSoft, marginBottom: 4 }}>Day</div>
+                  <select style={inputStyle} value={s.day} onChange={(e) => updateSlot(s.id, "day", e.target.value)}>
+                    {DAYS.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11.5, color: COLORS.inkSoft, marginBottom: 4 }}>From</div>
+                  <input type="time" style={inputStyle} value={s.from} onChange={(e) => updateSlot(s.id, "from", e.target.value)} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11.5, color: COLORS.inkSoft, marginBottom: 4 }}>To</div>
+                  <input type="time" style={inputStyle} value={s.to} onChange={(e) => updateSlot(s.id, "to", e.target.value)} />
+                </div>
+                {slots.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeSlot(s.id)}
+                    style={{ border: "none", background: "none", color: COLORS.danger, fontSize: 18, cursor: "pointer", paddingBottom: 6 }}
+                    title="Remove this slot"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              {err && <div style={{ fontSize: 12, color: COLORS.danger, marginTop: 6 }}>{err}</div>}
+              {!err && warning && <div style={{ fontSize: 12, color: COLORS.brass, marginTop: 6 }}>{warning}</div>}
+            </div>
+          );
+        })}
+        <button
+          type="button"
+          onClick={addSlot}
+          style={{ width: "100%", padding: 10, border: `1px dashed ${COLORS.line}`, borderRadius: 4, background: "none", color: COLORS.chalk, fontWeight: 600, fontSize: 13.5, cursor: "pointer", marginBottom: 14 }}
+        >
+          + Add another time slot
+        </button>
+
         <Field label="Notes (optional)">
           <textarea style={{ ...inputStyle, minHeight: 60 }} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
@@ -2288,8 +2407,16 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
             <div key={i.id} style={{ border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: 12, marginBottom: 8, fontSize: 13 }}>
               <div style={{ fontWeight: 700 }}>{i.tutorName}</div>
               <div style={{ color: COLORS.inkSoft }}>
-                {listing?.roomName} · {i.date} {i.start} · {i.durationHours}h · {i.tutorContact}
+                {listing?.roomName} · {i.tutorContact}
               </div>
+              <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
+                {i.slots ? slotSummary(i.slots) : `${i.date} ${i.start} · ${i.durationHours}h`}
+              </div>
+              {i.startDate && (
+                <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
+                  From {i.startDate} · {COMMITMENT_OPTIONS.find((o) => o.value === i.commitmentLength)?.label || i.commitmentLength}
+                </div>
+              )}
               {i.notes && <div style={{ color: COLORS.inkSoft, marginTop: 4 }}>"{i.notes}"</div>}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <Button variant="accent" onClick={() => setInquiryStatus(i.id, "confirmed")}>
