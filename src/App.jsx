@@ -1187,6 +1187,17 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
     req.forEach((f) => {
       if (!center[f]?.trim()) next[f] = "Required";
     });
+
+    // Catches the "I forgot I already registered" case before a duplicate
+    // center gets created — email is a much stronger identity signal than
+    // address, which can vary in formatting or change if a center moves.
+    if (center.email?.trim()) {
+      const dupe = centers.find((c) => (c.email || "").trim().toLowerCase() === center.email.trim().toLowerCase());
+      if (dupe) {
+        next.email = `"${dupe.centerName}" is already registered with this email. If that's you, use Manage Listing to add a classroom instead of registering again.`;
+      }
+    }
+
     setErrors(next);
     return Object.keys(next).length === 0;
   };
