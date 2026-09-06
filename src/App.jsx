@@ -866,10 +866,10 @@ function ListingCard({ listing, onInquire }) {
       <div style={{ padding: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 16, fontFamily: SERIF }}>{listing.roomName}</div>
-            <div style={{ fontSize: 12.5, color: COLORS.inkSoft }}>
-              {listing.center?.centerName} · {formatFullAddress(listing.center)}
+            <div style={{ fontWeight: 700, fontSize: 16, fontFamily: SERIF }}>
+              {listing.center?.centerName} - {listing.roomName}
             </div>
+            <div style={{ fontSize: 12.5, color: COLORS.inkSoft }}>{formatFullAddress(listing.center)}</div>
             {formatMrtSummary(listing.center) && (
               <div style={{ fontSize: 12.5, color: COLORS.ink, fontWeight: 600, marginTop: 2 }}>
                 {formatMrtSummary(listing.center)}
@@ -999,7 +999,7 @@ function InquiryModal({ listing, onClose, onSubmit }) {
       <div style={{ background: "#fff", borderRadius: 8, padding: 24, maxWidth: 480, width: "100%", margin: "20px 0" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 2, fontFamily: SERIF }}>Request to book</div>
         <div style={{ fontSize: 13, color: COLORS.inkSoft, marginBottom: 16 }}>
-          {listing.roomName} · {listing.center?.centerName}
+          {listing.center?.centerName} - {listing.roomName}
         </div>
 
         <Field label="Your name" error={errors.name}>
@@ -2465,6 +2465,7 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
           .sort((a, b) => b.createdAt - a.createdAt)
           .map((i) => {
             const listing = listings.find((l) => l.id === i.listingId);
+            const center = listing ? centerById(listing.centerId) : null;
             const statusBadge =
               i.status === "confirmed"
                 ? { text: "Confirmed", bg: COLORS.chalkSoft, fg: COLORS.chalk }
@@ -2478,7 +2479,7 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
                   <Badge label={statusBadge.text} bg={statusBadge.bg} fg={statusBadge.fg} />
                 </div>
                 <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
-                  {listing?.roomName} · {i.tutorContact}
+                  {center?.centerName} — {listing?.roomName} · {i.tutorContact}
                 </div>
                 <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
                   {i.slots ? slotSummary(i.slots) : `${i.date} ${i.start} · ${i.durationHours}h`}
