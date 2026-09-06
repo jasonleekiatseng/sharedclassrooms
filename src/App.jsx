@@ -684,9 +684,11 @@ export default function App() {
           <ManageListing
             centers={centers}
             listings={listings}
+            inquiries={inquiries}
             updateCenterInfo={updateCenterInfo}
             updateListingInfo={updateListingInfo}
             addListing={addListing}
+            setInquiryStatus={setInquiryStatus}
             showToast={showToast}
           />
         ) : (
@@ -704,7 +706,6 @@ export default function App() {
             centerById={centerById}
             setListingAudit={setListingAudit}
             setCenterStanding={setCenterStanding}
-            setInquiryStatus={setInquiryStatus}
           />
         )}
       </main>
@@ -1907,7 +1908,7 @@ function RealGoogleSignInButton({ clientId, onVerifiedEmail, onError }) {
   );
 }
 
-function ManageListing({ centers, listings, updateCenterInfo, updateListingInfo, addListing, showToast }) {
+function ManageListing({ centers, listings, inquiries, updateCenterInfo, updateListingInfo, addListing, setInquiryStatus, showToast }) {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const [googleEmail, setGoogleEmail] = useState(null); // the "signed in" Google account email
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -2010,7 +2011,13 @@ function ManageListing({ centers, listings, updateCenterInfo, updateListingInfo,
       </div>
       {myListings.map((l) => (
         <div className="sc-form-panel" style={{ marginBottom: 20 }} key={l.id}>
-          <ManageListingSection listing={l} updateListingInfo={updateListingInfo} showToast={showToast} />
+          <ManageListingSection
+            listing={l}
+            inquiries={inquiries.filter((i) => i.listingId === l.id)}
+            setInquiryStatus={setInquiryStatus}
+            updateListingInfo={updateListingInfo}
+            showToast={showToast}
+          />
         </div>
       ))}
       {myListings.length === 0 && <p className="sc-form-note">No classrooms on file for this center yet.</p>}
@@ -2221,7 +2228,7 @@ function ManageCenterSection({ center, updateCenterInfo, showToast }) {
   );
 }
 
-function ManageListingSection({ listing, updateListingInfo, showToast }) {
+function ManageListingSection({ listing, inquiries, setInquiryStatus, updateListingInfo, showToast }) {
   const [selfForm, setSelfForm] = useState({
     pricePerHour: listing.pricePerHour,
     minBookingHours: listing.minBookingHours,
@@ -2333,12 +2340,53 @@ function ManageListingSection({ listing, updateListingInfo, showToast }) {
       <button type="button" className="sc-form-btn-ghost" onClick={savePhys}>
         Save & flag for re-check
       </button>
+
+      <h3 className="sc-form-subheading">Booking requests</h3>
+      <p className="sc-form-hint">
+        The decision to confirm or decline is yours — you know your own scheduling conflicts and who you want
+        teaching in your space. SharedClassrooms just passes the request along and keeps a record of it.
+      </p>
+      {inquiries.length === 0 && <p className="sc-form-note">No requests for this classroom yet.</p>}
+      {inquiries.map((i) => {
+        const statusBadge =
+          i.status === "confirmed"
+            ? { text: "Confirmed", bg: COLORS.chalkSoft, fg: COLORS.chalk }
+            : i.status === "declined"
+            ? { text: "Declined", bg: COLORS.dangerSoft, fg: COLORS.danger }
+            : { text: "Awaiting your decision", bg: COLORS.brassSoft, fg: COLORS.brass };
+        return (
+          <div key={i.id} style={{ border: `1px solid ${COLORS.line}`, borderRadius: 4, padding: 12, marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5 }}>{i.tutorName}</div>
+              <Badge label={statusBadge.text} bg={statusBadge.bg} fg={statusBadge.fg} />
+            </div>
+            <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 4 }}>{i.tutorContact}</div>
+            <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 2 }}>{i.slots ? slotSummary(i.slots) : `${i.date} ${i.start} · ${i.durationHours}h`}</div>
+            {i.startDate && (
+              <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 2 }}>
+                From {i.startDate} · {COMMITMENT_OPTIONS.find((o) => o.value === i.commitmentLength)?.label || i.commitmentLength}
+              </div>
+            )}
+            {i.notes && <div style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: 4, fontStyle: "italic" }}>"{i.notes}"</div>}
+            {i.status === "pending" && (
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <Button variant="accent" onClick={() => setInquiryStatus(i.id, "confirmed")}>
+                  Confirm
+                </Button>
+                <Button variant="ghost" onClick={() => setInquiryStatus(i.id, "declined")}>
+                  Decline
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </section>
   );
 }
 
 // ================= ADMIN =================
-function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, centerById, setListingAudit, setCenterStanding, setInquiryStatus }) {
+function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, centerById, setListingAudit, setCenterStanding }) {
   if (!unlocked) {
     return (
       <div style={{ maxWidth: 320 }}>
@@ -2354,7 +2402,12 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
   const pending = listings.filter((l) => l.auditStatus === "pending_review");
   const verified = listings.filter((l) => l.auditStatus === "verified");
   const flagged = listings.filter((l) => l.auditStatus === "flagged");
-  const pendingInquiries = inquiries.filter((i) => i.status === "pending");
+
+  // Every inquiry ever made is kept permanently and tied to its listing —
+  // this count is the evidence a listing fee would need to justify itself
+  // ("this center has received N inquiries"), so it's surfaced everywhere
+  // a listing shows up in Admin, not just in the inquiries list itself.
+  const inquiryCountFor = (listingId) => inquiries.filter((i) => i.listingId === listingId).length;
 
   return (
     <div>
@@ -2367,6 +2420,7 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
             key={l.id}
             listing={l}
             center={centerById(l.centerId)}
+            inquiryCount={inquiryCountFor(l.id)}
             onVerify={(videoUrl, calendarUrl) => setListingAudit(l.id, "verified", videoUrl, calendarUrl)}
             onFlag={() => setListingAudit(l.id, "flagged")}
           />
@@ -2376,7 +2430,7 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
       <Section title={`Verified & live (${verified.length})`}>
         {verified.length === 0 && <Empty text="No live listings yet." />}
         {verified.map((l) => (
-          <AdminListingRow key={l.id} listing={l} center={centerById(l.centerId)}>
+          <AdminListingRow key={l.id} listing={l} center={centerById(l.centerId)} inquiryCount={inquiryCountFor(l.id)}>
             <Button variant="danger" onClick={() => setListingAudit(l.id, "flagged")}>
               Flag for re-audit
             </Button>
@@ -2391,6 +2445,7 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
               key={l.id}
               listing={l}
               center={centerById(l.centerId)}
+              inquiryCount={inquiryCountFor(l.id)}
               onVerify={(videoUrl, calendarUrl) => setListingAudit(l.id, "verified", videoUrl, calendarUrl)}
               onFlag={() => setListingAudit(l.id, "flagged")}
               reVerifyMode
@@ -2399,36 +2454,44 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
         </Section>
       )}
 
-      <Section title={`Pending inquiries (${pendingInquiries.length})`}>
-        {pendingInquiries.length === 0 && <Empty text="No open inquiries." />}
-        {pendingInquiries.map((i) => {
-          const listing = listings.find((l) => l.id === i.listingId);
-          return (
-            <div key={i.id} style={{ border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: 12, marginBottom: 8, fontSize: 13 }}>
-              <div style={{ fontWeight: 700 }}>{i.tutorName}</div>
-              <div style={{ color: COLORS.inkSoft }}>
-                {listing?.roomName} · {i.tutorContact}
-              </div>
-              <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
-                {i.slots ? slotSummary(i.slots) : `${i.date} ${i.start} · ${i.durationHours}h`}
-              </div>
-              {i.startDate && (
-                <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
-                  From {i.startDate} · {COMMITMENT_OPTIONS.find((o) => o.value === i.commitmentLength)?.label || i.commitmentLength}
+      <Section title={`Inquiries logged (${inquiries.length})`}>
+        <p style={{ fontSize: 12.5, color: COLORS.inkSoft, marginTop: -4, marginBottom: 12 }}>
+          Read-only — confirming or declining a booking is the center owner's call, made from their own Manage
+          Listing screen. This view is for tracking activity, e.g. as evidence of inquiry volume per listing.
+        </p>
+        {inquiries.length === 0 && <Empty text="No inquiries logged yet." />}
+        {inquiries
+          .slice()
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .map((i) => {
+            const listing = listings.find((l) => l.id === i.listingId);
+            const statusBadge =
+              i.status === "confirmed"
+                ? { text: "Confirmed", bg: COLORS.chalkSoft, fg: COLORS.chalk }
+                : i.status === "declined"
+                ? { text: "Declined", bg: COLORS.dangerSoft, fg: COLORS.danger }
+                : { text: "Awaiting center's decision", bg: COLORS.brassSoft, fg: COLORS.brass };
+            return (
+              <div key={i.id} style={{ border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: 12, marginBottom: 8, fontSize: 13 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 700 }}>{i.tutorName}</div>
+                  <Badge label={statusBadge.text} bg={statusBadge.bg} fg={statusBadge.fg} />
                 </div>
-              )}
-              {i.notes && <div style={{ color: COLORS.inkSoft, marginTop: 4 }}>"{i.notes}"</div>}
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <Button variant="accent" onClick={() => setInquiryStatus(i.id, "confirmed")}>
-                  Confirmed
-                </Button>
-                <Button variant="ghost" onClick={() => setInquiryStatus(i.id, "declined")}>
-                  Declined
-                </Button>
+                <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
+                  {listing?.roomName} · {i.tutorContact}
+                </div>
+                <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
+                  {i.slots ? slotSummary(i.slots) : `${i.date} ${i.start} · ${i.durationHours}h`}
+                </div>
+                {i.startDate && (
+                  <div style={{ color: COLORS.inkSoft, marginTop: 2 }}>
+                    From {i.startDate} · {COMMITMENT_OPTIONS.find((o) => o.value === i.commitmentLength)?.label || i.commitmentLength}
+                  </div>
+                )}
+                {i.notes && <div style={{ color: COLORS.inkSoft, marginTop: 4 }}>"{i.notes}"</div>}
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
       </Section>
 
       <Section title={`Centers (${centers.length})`}>
@@ -2485,7 +2548,7 @@ function Empty({ text }) {
   return <div style={{ color: COLORS.inkSoft, fontSize: 13, padding: "10px 0" }}>{text}</div>;
 }
 
-function PendingAuditRow({ listing, center, onVerify, onFlag, reVerifyMode }) {
+function PendingAuditRow({ listing, center, inquiryCount, onVerify, onFlag, reVerifyMode }) {
   const [videoUrl, setVideoUrl] = useState(listing.siteTourVideoUrl || "");
   const [calendarUrl, setCalendarUrl] = useState(listing.calendarBookingUrl || "");
   return (
@@ -2500,6 +2563,7 @@ function PendingAuditRow({ listing, center, onVerify, onFlag, reVerifyMode }) {
           <Badge label={`Readiness ${listing.readinessScoreAtSubmission}/100`} bg={COLORS.brassSoft} fg={COLORS.brass} />
         )}
         {reVerifyMode && <Badge label="Edited — needs re-check" bg={COLORS.dangerSoft} fg={COLORS.danger} />}
+        {inquiryCount > 0 && <Badge label={`${inquiryCount} inquir${inquiryCount === 1 ? "y" : "ies"} logged`} bg={COLORS.chalkSoft} fg={COLORS.chalk} />}
       </div>
       {listing.addressMatchWarning && (
         <div style={{ color: COLORS.danger, fontSize: 12.5, marginBottom: 8, fontStyle: "italic" }}>⚠ {listing.addressMatchWarning}</div>
@@ -2525,7 +2589,7 @@ function PendingAuditRow({ listing, center, onVerify, onFlag, reVerifyMode }) {
   );
 }
 
-function AdminListingRow({ listing, center, children }) {
+function AdminListingRow({ listing, center, inquiryCount, children }) {
   return (
     <div style={{ border: `1px solid ${COLORS.line}`, borderRadius: 6, padding: 12, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13, flexWrap: "wrap", gap: 8 }}>
       <div>
@@ -2533,6 +2597,11 @@ function AdminListingRow({ listing, center, children }) {
         <div style={{ color: COLORS.inkSoft }}>
           {center?.centerName} · {center?.address} · up to {listing.capacity} pax · ${listing.pricePerHour}/hr
         </div>
+        {inquiryCount > 0 && (
+          <div style={{ marginTop: 4 }}>
+            <Badge label={`${inquiryCount} inquir${inquiryCount === 1 ? "y" : "ies"} logged`} bg={COLORS.chalkSoft} fg={COLORS.chalk} />
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", gap: 8 }}>{children}</div>
     </div>
