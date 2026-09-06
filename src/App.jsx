@@ -686,6 +686,7 @@ export default function App() {
             listings={listings}
             updateCenterInfo={updateCenterInfo}
             updateListingInfo={updateListingInfo}
+            addListing={addListing}
             showToast={showToast}
           />
         ) : (
@@ -742,6 +743,24 @@ export default function App() {
 // ================= BROWSE =================
 function formatMinBooking(l) {
   return Number(l.minBookingHours) || 2;
+}
+
+const TRANSFER_LABELS = {
+  direct: "Direct walk, no transfer",
+  bus: "Bus needed",
+  multiple: "Multiple transfers needed",
+};
+
+function formatFullAddress(center) {
+  if (!center) return "";
+  const postal = center.postalCode ? ` Singapore ${center.postalCode}` : "";
+  return `${center.address || ""}${postal}`;
+}
+
+function formatMrtSummary(center) {
+  if (!center || !center.nearestMrt || !center.mrtWalkMinutes) return null;
+  const transfer = TRANSFER_LABELS[center.transferRequired];
+  return `Nearest MRT: ${center.mrtWalkMinutes} minutes from ${center.nearestMrt}${transfer ? ` (${transfer})` : ""}`;
 }
 
 function Browse({ listings, onInquire, showToast }) {
@@ -848,8 +867,13 @@ function ListingCard({ listing, onInquire }) {
           <div>
             <div style={{ fontWeight: 700, fontSize: 16, fontFamily: SERIF }}>{listing.roomName}</div>
             <div style={{ fontSize: 12.5, color: COLORS.inkSoft }}>
-              {listing.center?.centerName} · {listing.center?.address}
+              {listing.center?.centerName} · {formatFullAddress(listing.center)}
             </div>
+            {formatMrtSummary(listing.center) && (
+              <div style={{ fontSize: 12.5, color: COLORS.ink, fontWeight: 600, marginTop: 2 }}>
+                {formatMrtSummary(listing.center)}
+              </div>
+            )}
           </div>
           <Badge label={badge.text} bg={badge.bg} fg={badge.fg} />
         </div>
@@ -1046,41 +1070,88 @@ function MultiPhotoUploadField({ photos, onChange }) {
   );
 }
 
+// Shared classroom form fields, used by both the intake form (ListSpace)
+// and the "add a classroom to my existing center" flow inside the
+// authenticated Manage Listing screen — one definition, so the two never
+// drift apart.
+function ClassroomFields({ classroom: c, errors: err, onUpdate, onToggleScheduleDay, onSetScheduleTime, onToggleAmenity }) {
+  return (
+    <>
+      <div className="sc-form-grid">
+        <Field label="Capacity (seats)" error={err.capacity}>
+          <input type="number" min={1} value={c.capacity} onChange={(e) => onUpdate("capacity", e.target.value)} />
+        </Field>
+        <Field label="Price per hour (SGD)" error={err.pricePerHour}>
+          <input type="number" min={0} value={c.pricePerHour} onChange={(e) => onUpdate("pricePerHour", e.target.value)} />
+        </Field>
+        <Field label="Minimum booking (hours)" error={err.minBookingHours}>
+          <input type="number" min={2} value={c.minBookingHours} onChange={(e) => onUpdate("minBookingHours", e.target.value)} />
+        </Field>
+      </div>
+
+      <ScheduleGrid schedule={c.schedule} error={err.schedule} onToggleDay={onToggleScheduleDay} onTimeChange={onSetScheduleTime} />
+
+      <Field label="Amenities">
+        <AmenityPicker amenities={c.amenities} onToggle={onToggleAmenity} />
+      </Field>
+
+      <div className="sc-form-grid">
+        <Field label="Long-term booking discount?">
+          <label className="sc-form-check">
+            <input type="checkbox" checked={c.longTermDiscount} onChange={(e) => onUpdate("longTermDiscount", e.target.checked)} />
+            Yes, offer a discount
+          </label>
+        </Field>
+        <Field label="Security deposit?">
+          <label className="sc-form-check">
+            <input type="checkbox" checked={c.hasDeposit} onChange={(e) => onUpdate("hasDeposit", e.target.checked)} />
+            Yes, a deposit applies
+          </label>
+          {c.hasDeposit && (
+            <input type="number" placeholder="Deposit amount (SGD)" value={c.deposit} onChange={(e) => onUpdate("deposit", e.target.value)} />
+          )}
+        </Field>
+      </div>
+
+      <Field label="Toilet access">
+        <select value={c.toiletType} onChange={(e) => onUpdate("toiletType", e.target.value)}>
+          <option value="">Select one</option>
+          <option value="common_center">Common, within center</option>
+          <option value="common_building">Shared building common toilet</option>
+        </select>
+      </Field>
+
+      <Field label="Additional fees (optional)">
+        <input placeholder="e.g. cleaning, maintenance" value={c.additionalFees} onChange={(e) => onUpdate("additionalFees", e.target.value)} />
+      </Field>
+
+      <Field label="Photos (optional)" hint="Add as many as you'd like — phone photos are fine, they're compressed automatically. Just representative shots for now; we'll capture the full site tour at audit.">
+        <MultiPhotoUploadField photos={c.photos} onChange={(photos) => onUpdate("photos", photos)} />
+      </Field>
+    </>
+  );
+}
+
 // ================= LIST YOUR SPACE =================
 function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
   const [step, setStep] = useState(0);
-  const [existingCenterId, setExistingCenterId] = useState("");
   const [center, setCenter] = useState(emptyCenterInfo);
   const [classrooms, setClassrooms] = useState([emptyClassroom()]);
   const [errors, setErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [lastSubmitCount, setLastSubmitCount] = useState(0);
 
-  const isExisting = Boolean(existingCenterId);
-
-  // How many classrooms this center already has, so a new batch continues
-  // the letter sequence (Classroom A, B, C…) instead of restarting at A.
-  const existingListingCount = React.useMemo(() => {
-    if (!existingCenterId) return 0;
-    return listings.filter((l) => l.centerId === existingCenterId).length;
-  }, [existingCenterId, listings]);
-
-  const labelFor = (idx) => `Classroom ${classroomLetter(existingListingCount + idx)}`;
+  // Always labelled from Classroom A — a brand-new center has no existing
+  // listings to continue a sequence from. Adding more classrooms to an
+  // already-registered center happens through Manage Listing instead, where
+  // Google Sign-In actually proves the person belongs to that center; this
+  // page never trusts an unauthenticated claim of "I already have a center."
+  const labelFor = (idx) => `Classroom ${classroomLetter(idx)}`;
 
   const readiness = React.useMemo(() => computeReadiness(center, classrooms), [center, classrooms]);
   const suggestions = React.useMemo(() => buildSuggestions(center, classrooms, readiness, labelFor), [center, classrooms, readiness]);
 
   const updateCenter = (field, value) => setCenter((prev) => ({ ...prev, [field]: value }));
-
-  const selectExistingCenter = (id) => {
-    setExistingCenterId(id);
-    if (!id) {
-      setCenter(emptyCenterInfo);
-      return;
-    }
-    const found = centers.find((c) => c.id === id);
-    if (found) setCenter({ ...emptyCenterInfo, ...found });
-  };
 
   const updateClassroom = (id, field, value) =>
     setClassrooms((prev) => prev.map((c) => (c.id === id ? { ...c, [field]: value } : c)));
@@ -1111,7 +1182,6 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
   const removeClassroom = (id) => setClassrooms((prev) => (prev.length > 1 ? prev.filter((c) => c.id !== id) : prev));
 
   const validateStep0 = () => {
-    if (isExisting) return true;
     const req = ["centerName", "contactName", "phone", "email", "postalCode"];
     const next = {};
     req.forEach((f) => {
@@ -1147,41 +1217,37 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
   const goBack = () => setStep((s) => Math.max(s - 1, 0));
 
   const handleFinalSubmit = async () => {
-    let centerId = existingCenterId;
-
     // Flag (never auto-merge) a brand-new center whose address matches a
     // DIFFERENT existing center — Admin checks whether it's shared premises
     // or an unrelated coincidence, rather than the system deciding.
     let addressMatchWarning = null;
-    if (!isExisting) {
-      const addr = center.address.trim().toLowerCase();
-      const postal = center.postalCode.trim();
-      if (addr || postal) {
-        const match = centers.find(
-          (c) => (c.address || "").trim().toLowerCase() === addr && (c.postalCode || "").trim() === postal && addr
-        );
-        if (match) {
-          addressMatchWarning = `Address matches an existing center on file: "${match.centerName}" — check whether this is shared/duplicate premises.`;
-        }
+    const addr = center.address.trim().toLowerCase();
+    const postal = center.postalCode.trim();
+    if (addr || postal) {
+      const match = centers.find(
+        (c) => (c.address || "").trim().toLowerCase() === addr && (c.postalCode || "").trim() === postal && addr
+      );
+      if (match) {
+        addressMatchWarning = `Address matches an existing center on file: "${match.centerName}" — check whether this is shared/duplicate premises.`;
       }
-      centerId = await addCenter({
-        centerName: center.centerName,
-        contactName: center.contactName,
-        phone: center.phone,
-        email: center.email,
-        address: center.address,
-        postalCode: center.postalCode,
-        website: center.website,
-        description: center.description,
-        nearestMrt: center.nearestMrt,
-        mrtWalkMinutes: center.mrtWalkMinutes,
-        transferRequired: center.transferRequired,
-        cleaningFrequency: center.cleaningFrequency,
-        canPutUpPoster: center.canPutUpPoster,
-        jointMarketing: center.jointMarketing,
-        marketingNotes: center.marketingNotes,
-      });
     }
+    const centerId = await addCenter({
+      centerName: center.centerName,
+      contactName: center.contactName,
+      phone: center.phone,
+      email: center.email,
+      address: center.address,
+      postalCode: center.postalCode,
+      website: center.website,
+      description: center.description,
+      nearestMrt: center.nearestMrt,
+      mrtWalkMinutes: center.mrtWalkMinutes,
+      transferRequired: center.transferRequired,
+      cleaningFrequency: center.cleaningFrequency,
+      canPutUpPoster: center.canPutUpPoster,
+      jointMarketing: center.jointMarketing,
+      marketingNotes: center.marketingNotes,
+    });
 
     for (let idx = 0; idx < classrooms.length; idx++) {
       const c = classrooms[idx];
@@ -1275,45 +1341,37 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
           {step === 0 && (
             <section>
               <h2>About your center</h2>
-
-              {centers.length > 0 && (
-                <Field label="Is your center already registered?" hint="Pick one to skip re-entering its details.">
-                  <select style={inputStyle} value={existingCenterId} onChange={(e) => selectExistingCenter(e.target.value)}>
-                    <option value="">— This is a new center —</option>
-                    {centers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.centerName}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              )}
+              <p className="sc-form-hint">
+                Already registered and just want to add another classroom? Do that from{" "}
+                <strong>Manage listing</strong> instead, once you've signed in — that keeps it tied to your actual
+                account rather than anyone being able to add listings under your center's name.
+              </p>
 
               <div className="sc-form-grid">
                 <Field label="Name of tuition center" error={errors.centerName}>
-                  <input disabled={isExisting} value={center.centerName} onChange={(e) => updateCenter("centerName", e.target.value)} />
+                  <input value={center.centerName} onChange={(e) => updateCenter("centerName", e.target.value)} />
                 </Field>
                 <Field label="Contact person" error={errors.contactName}>
-                  <input disabled={isExisting} value={center.contactName} onChange={(e) => updateCenter("contactName", e.target.value)} />
+                  <input value={center.contactName} onChange={(e) => updateCenter("contactName", e.target.value)} />
                 </Field>
                 <Field label="Phone number" error={errors.phone}>
-                  <input disabled={isExisting} type="tel" value={center.phone} onChange={(e) => updateCenter("phone", e.target.value)} />
+                  <input type="tel" value={center.phone} onChange={(e) => updateCenter("phone", e.target.value)} />
                 </Field>
                 <Field label="Email" error={errors.email}>
-                  <input disabled={isExisting} type="email" value={center.email} onChange={(e) => updateCenter("email", e.target.value)} />
+                  <input type="email" value={center.email} onChange={(e) => updateCenter("email", e.target.value)} />
                 </Field>
                 <Field label="Address">
-                  <input disabled={isExisting} value={center.address} onChange={(e) => updateCenter("address", e.target.value)} />
+                  <input value={center.address} onChange={(e) => updateCenter("address", e.target.value)} />
                 </Field>
                 <Field label="Postal code" error={errors.postalCode}>
-                  <input disabled={isExisting} value={center.postalCode} onChange={(e) => updateCenter("postalCode", e.target.value)} />
+                  <input value={center.postalCode} onChange={(e) => updateCenter("postalCode", e.target.value)} />
                 </Field>
                 <Field label="Website (optional)">
-                  <input disabled={isExisting} value={center.website} onChange={(e) => updateCenter("website", e.target.value)} />
+                  <input value={center.website} onChange={(e) => updateCenter("website", e.target.value)} />
                 </Field>
               </div>
               <Field label="Brief introduction of your center (optional)">
-                <textarea disabled={isExisting} rows={3} value={center.description} onChange={(e) => updateCenter("description", e.target.value)} />
+                <textarea rows={3} value={center.description} onChange={(e) => updateCenter("description", e.target.value)} />
               </Field>
 
               <h2 className="sc-form-subheading">Getting here & upkeep</h2>
@@ -1359,7 +1417,6 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
                 hint="Anything beyond the checkboxes above — e.g. a referral program, an open house, social media you'd co-post on, or a discount for a tutor's first booking."
               >
                 <textarea
-                  disabled={isExisting}
                   rows={3}
                   value={center.marketingNotes}
                   onChange={(e) => updateCenter("marketingNotes", e.target.value)}
@@ -1387,62 +1444,14 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
 
                     {c.expanded && (
                       <div className="sc-form-card-body">
-                        <div className="sc-form-grid">
-                          <Field label="Capacity (seats)" error={err.capacity}>
-                            <input type="number" min={1} value={c.capacity} onChange={(e) => updateClassroom(c.id, "capacity", e.target.value)} />
-                          </Field>
-                          <Field label="Price per hour (SGD)" error={err.pricePerHour}>
-                            <input type="number" min={0} value={c.pricePerHour} onChange={(e) => updateClassroom(c.id, "pricePerHour", e.target.value)} />
-                          </Field>
-                          <Field label="Minimum booking (hours)" error={err.minBookingHours}>
-                            <input type="number" min={2} value={c.minBookingHours} onChange={(e) => updateClassroom(c.id, "minBookingHours", e.target.value)} />
-                          </Field>
-                        </div>
-
-                        <ScheduleGrid
-                          schedule={c.schedule}
-                          error={err.schedule}
-                          onToggleDay={(day) => toggleScheduleDay(c.id, day)}
-                          onTimeChange={(day, field, value) => setScheduleTime(c.id, day, field, value)}
+                        <ClassroomFields
+                          classroom={c}
+                          errors={err}
+                          onUpdate={(field, value) => updateClassroom(c.id, field, value)}
+                          onToggleScheduleDay={(day) => toggleScheduleDay(c.id, day)}
+                          onSetScheduleTime={(day, field, value) => setScheduleTime(c.id, day, field, value)}
+                          onToggleAmenity={(item) => toggleAmenity(c.id, item)}
                         />
-
-                        <Field label="Amenities">
-                          <AmenityPicker amenities={c.amenities} onToggle={(item) => toggleAmenity(c.id, item)} />
-                        </Field>
-
-                        <div className="sc-form-grid">
-                          <Field label="Long-term booking discount?">
-                            <label className="sc-form-check">
-                              <input type="checkbox" checked={c.longTermDiscount} onChange={(e) => updateClassroom(c.id, "longTermDiscount", e.target.checked)} />
-                              Yes, offer a discount
-                            </label>
-                          </Field>
-                          <Field label="Security deposit?">
-                            <label className="sc-form-check">
-                              <input type="checkbox" checked={c.hasDeposit} onChange={(e) => updateClassroom(c.id, "hasDeposit", e.target.checked)} />
-                              Yes, a deposit applies
-                            </label>
-                            {c.hasDeposit && (
-                              <input type="number" placeholder="Deposit amount (SGD)" value={c.deposit} onChange={(e) => updateClassroom(c.id, "deposit", e.target.value)} />
-                            )}
-                          </Field>
-                        </div>
-
-                        <Field label="Toilet access">
-                          <select value={c.toiletType} onChange={(e) => updateClassroom(c.id, "toiletType", e.target.value)}>
-                            <option value="">Select one</option>
-                            <option value="common_center">Common, within center</option>
-                            <option value="common_building">Shared building common toilet</option>
-                          </select>
-                        </Field>
-
-                        <Field label="Additional fees (optional)">
-                          <input placeholder="e.g. cleaning, maintenance" value={c.additionalFees} onChange={(e) => updateClassroom(c.id, "additionalFees", e.target.value)} />
-                        </Field>
-
-                        <Field label="Photos (optional)" hint="Add as many as you'd like — phone photos are fine, they're compressed automatically. Just representative shots for now; we'll capture the full site tour at audit.">
-                          <MultiPhotoUploadField photos={c.photos} onChange={(photos) => updateClassroom(c.id, "photos", photos)} />
-                        </Field>
 
                         {classrooms.length > 1 && (
                           <button type="button" className="sc-form-remove" onClick={() => removeClassroom(c.id)}>
@@ -1768,7 +1777,7 @@ function RealGoogleSignInButton({ clientId, onVerifiedEmail, onError }) {
   );
 }
 
-function ManageListing({ centers, listings, updateCenterInfo, updateListingInfo, showToast }) {
+function ManageListing({ centers, listings, updateCenterInfo, updateListingInfo, addListing, showToast }) {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const [googleEmail, setGoogleEmail] = useState(null); // the "signed in" Google account email
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -1875,10 +1884,114 @@ function ManageListing({ centers, listings, updateCenterInfo, updateListingInfo,
         </div>
       ))}
       {myListings.length === 0 && <p className="sc-form-note">No classrooms on file for this center yet.</p>}
+      <div className="sc-form-panel" style={{ marginBottom: 20 }}>
+        <AddClassroomSection center={center} existingCount={myListings.length} addListing={addListing} showToast={showToast} />
+      </div>
       <button type="button" className="sc-form-btn-ghost" onClick={signOut}>
         Sign out / switch account
       </button>
     </div>
+  );
+}
+
+// Adding a classroom to an already-registered center — only reachable after
+// real, verified Google Sign-In above. This replaces the old public
+// dropdown that let anyone pick an existing center's name and add listings
+// under it with no proof of ownership at all.
+function AddClassroomSection({ center, existingCount, addListing, showToast }) {
+  const [open, setOpen] = useState(false);
+  const [classroom, setClassroom] = useState(emptyClassroom());
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  const label = `Classroom ${classroomLetter(existingCount)}`;
+
+  const update = (field, value) => setClassroom((prev) => ({ ...prev, [field]: value }));
+  const toggleDay = (day) =>
+    setClassroom((prev) => ({ ...prev, schedule: { ...prev.schedule, [day]: toggledDay(prev.schedule[day]) } }));
+  const setTime = (day, field, value) =>
+    setClassroom((prev) => ({ ...prev, schedule: { ...prev.schedule, [day]: { ...prev.schedule[day], [field]: value } } }));
+  const toggleAmenity = (item) =>
+    setClassroom((prev) => ({
+      ...prev,
+      amenities: prev.amenities.includes(item) ? prev.amenities.filter((a) => a !== item) : [...prev.amenities, item],
+    }));
+
+  const validate = () => {
+    const e = {};
+    if (!classroom.capacity) e.capacity = "Required";
+    const activeDays = DAYS.filter((d) => classroom.schedule[d].on);
+    if (!activeDays.length) e.schedule = "Pick at least one day";
+    else if (activeDays.some((d) => !classroom.schedule[d].from || !classroom.schedule[d].to)) e.schedule = "Set a time range for each day you selected";
+    if (!classroom.pricePerHour) e.pricePerHour = "Required";
+    if (Number(classroom.minBookingHours) < 2) e.minBookingHours = "Minimum is 2 hours";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const submit = async () => {
+    if (!validate()) return;
+    setSaving(true);
+    const readiness = computeReadiness(center, [classroom]);
+    await addListing({
+      centerId: center.id,
+      roomName: label,
+      capacity: classroom.capacity,
+      pricePerHour: classroom.pricePerHour,
+      minBookingHours: classroom.minBookingHours,
+      schedule: classroom.schedule,
+      longTermDiscount: classroom.longTermDiscount,
+      hasDeposit: classroom.hasDeposit,
+      deposit: classroom.deposit,
+      additionalFees: classroom.additionalFees,
+      amenities: classroom.amenities,
+      toiletType: classroom.toiletType,
+      photos: classroom.photos,
+      readinessScoreAtSubmission: readiness.overall,
+    });
+    setSaving(false);
+    setClassroom(emptyClassroom());
+    setErrors({});
+    setOpen(false);
+    showToast(`${label} added — it'll go live once visited and verified, same as any new listing.`);
+  };
+
+  if (!open) {
+    return (
+      <button type="button" className="sc-form-add" onClick={() => setOpen(true)}>
+        + Add another classroom ({label})
+      </button>
+    );
+  }
+
+  return (
+    <section>
+      <h2>{label}</h2>
+      <p className="sc-form-hint">New classrooms are hidden from Browse until physically verified, same as any first-time listing.</p>
+      <ClassroomFields
+        classroom={classroom}
+        errors={errors}
+        onUpdate={update}
+        onToggleScheduleDay={toggleDay}
+        onSetScheduleTime={setTime}
+        onToggleAmenity={toggleAmenity}
+      />
+      <div style={{ display: "flex", gap: 10 }}>
+        <Button onClick={submit} disabled={saving}>
+          {saving ? "Adding…" : "Add classroom"}
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setOpen(false);
+            setClassroom(emptyClassroom());
+            setErrors({});
+          }}
+        >
+          Cancel
+        </Button>
+      </div>
+    </section>
   );
 }
 
