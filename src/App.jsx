@@ -858,7 +858,7 @@ function Browse({ listings, onInquire, showToast }) {
           No verified rooms match yet. Once a center lists a room and it's audited, it'll show up here.
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div className="sc-browse-grid">
           {filtered.map((l) => (
             <ListingCard key={l.id} listing={l} onInquire={() => setActiveInquiry(l)} />
           ))}
@@ -884,14 +884,14 @@ function PhotoCarousel({ photos, alt }) {
   const [index, setIndex] = useState(0);
   if (!photos || photos.length === 0) {
     return (
-      <div style={{ height: 120, background: `linear-gradient(135deg, ${COLORS.brass}33, ${COLORS.chalk}22)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: COLORS.inkSoft }}>
+      <div style={{ aspectRatio: "4 / 3", background: `linear-gradient(135deg, ${COLORS.brass}33, ${COLORS.chalk}22)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: COLORS.inkSoft }}>
         No photo uploaded
       </div>
     );
   }
   return (
-    <div style={{ position: "relative", height: 120 }}>
-      <img src={photos[index]} alt={alt} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+    <div style={{ position: "relative", aspectRatio: "4 / 3" }}>
+      <img src={photos[index]} alt={alt} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
       {photos.length > 1 && (
         <>
           <button
@@ -2981,12 +2981,14 @@ function ListFormStyle() {
         font-size: 13.5px;
         cursor: pointer;
       }
+      .sc-browse-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
       @media (max-width: 680px) {
         .sc-form-body { flex-direction: column; }
         .sc-form-rail { flex-direction: row; overflow-x: auto; position: static; width: 100%; }
         .sc-form-grid, .sc-form-amenity-groups { grid-template-columns: 1fr; }
         .sc-form-schedule-row { grid-template-columns: 70px 1fr auto 1fr; }
         .sc-form-panel { padding: 20px; }
+        .sc-browse-grid { grid-template-columns: 1fr; }
       }
     `}</style>
   );
