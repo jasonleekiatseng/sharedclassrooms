@@ -1334,6 +1334,8 @@ function ClassroomFields({ classroom: c, errors: err, onUpdate, onToggleSchedule
 }
 
 // ================= LIST YOUR SPACE =================
+const LIST_SPACE_DRAFT_KEY = "sc_list_space_draft_v1";
+
 function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
   const [step, setStep] = useState(0);
   const [center, setCenter] = useState(emptyCenterInfo);
@@ -1341,6 +1343,66 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
   const [errors, setErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const [lastSubmitCount, setLastSubmitCount] = useState(0);
+  const [foundDraft, setFoundDraft] = useState(null); // { center, classrooms, step, savedAt } or null
+  const [draftChecked, setDraftChecked] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState(null);
+
+  // On first load, check for an unfinished draft from a previous visit —
+  // this is what lets someone pick back up after a closed tab, a dropped
+  // call, or their browser crashing mid-form, instead of starting over.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LIST_SPACE_DRAFT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && (parsed.center || parsed.classrooms)) setFoundDraft(parsed);
+      }
+    } catch (e) {
+      console.error("draft read error", e);
+    }
+    setDraftChecked(true);
+  }, []);
+
+  // Auto-save as the person fills the form in — only once there's actually
+  // something worth saving, so a brand-new blank visit doesn't immediately
+  // write (and later "resume") an empty draft.
+  useEffect(() => {
+    if (!draftChecked || foundDraft) return; // don't overwrite an unresolved draft prompt
+    const hasContent =
+      center.centerName?.trim() ||
+      center.email?.trim() ||
+      classrooms.some((c) => c.capacity || c.pricePerHour || c.amenities.length > 0);
+    if (!hasContent) return;
+    try {
+      const savedAt = Date.now();
+      localStorage.setItem(LIST_SPACE_DRAFT_KEY, JSON.stringify({ center, classrooms, step, savedAt }));
+      setDraftSavedAt(savedAt);
+    } catch (e) {
+      console.error("draft save error", e);
+    }
+  }, [center, classrooms, step, draftChecked, foundDraft]);
+
+  const clearDraft = () => {
+    try {
+      localStorage.removeItem(LIST_SPACE_DRAFT_KEY);
+    } catch (e) {
+      console.error("draft clear error", e);
+    }
+    setDraftSavedAt(null);
+  };
+
+  const resumeDraft = () => {
+    setCenter(foundDraft.center || emptyCenterInfo);
+    setClassrooms(foundDraft.classrooms || [emptyClassroom()]);
+    setStep(foundDraft.step || 0);
+    setDraftSavedAt(foundDraft.savedAt || null);
+    setFoundDraft(null);
+  };
+
+  const discardDraft = () => {
+    clearDraft();
+    setFoundDraft(null);
+  };
 
   // Always labelled from Classroom A — a brand-new center has no existing
   // listings to continue a sequence from. Adding more classrooms to an
@@ -1485,6 +1547,7 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
     showToast("Listing submitted — it'll go live once we've visited and verified the room.");
     setLastSubmitCount(classrooms.length);
     setSubmitted(true);
+    clearDraft();
   };
 
   const listAnother = () => {
@@ -1519,6 +1582,33 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
     );
   }
 
+  if (foundDraft) {
+    return (
+      <div className="sc-form-root">
+        <header className="sc-form-header">
+          <h1>List your spare classroom</h1>
+        </header>
+        <div className="sc-form-panel" style={{ textAlign: "center", maxWidth: 480 }}>
+          <div style={{ fontWeight: 700, fontSize: 16, fontFamily: SERIF, marginBottom: 8 }}>
+            Welcome back — you have an unfinished draft
+          </div>
+          <p className="sc-form-note" style={{ marginBottom: 20 }}>
+            {foundDraft.savedAt
+              ? `Saved on this device on ${new Date(foundDraft.savedAt).toLocaleString()}.`
+              : "Saved on this device from an earlier visit."}{" "}
+            Pick up where you left off, or start fresh.
+          </p>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+            <Button onClick={resumeDraft}>Continue draft</Button>
+            <Button variant="ghost" onClick={discardDraft}>
+              Start fresh
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="sc-form-root">
       <header className="sc-form-header">
@@ -1537,6 +1627,11 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
               <span>{label}</span>
             </div>
           ))}
+          {draftSavedAt && (
+            <div style={{ fontSize: 11, color: COLORS.chalk, marginTop: 10, display: "flex", alignItems: "center", gap: 5 }}>
+              ✓ Draft saved on this device
+            </div>
+          )}
           {step < 2 && (
             <div className="sc-form-rail-score">
               <div className="sc-form-rail-score-num">{readiness.overall}</div>
