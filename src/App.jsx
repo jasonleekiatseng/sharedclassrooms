@@ -164,6 +164,7 @@ const emptyCenterInfo = {
   contactName: "",
   phone: "",
   email: "",
+  contactEmail: "",
   address: "",
   postalCode: "",
   website: "",
@@ -178,6 +179,15 @@ const emptyCenterInfo = {
 };
 
 const LIST_STEPS = ["Center details", "Your classrooms", "Readiness report & submit"];
+
+// The sign-in email (used only to match a Google account) and the contact
+// email (whatever the center wants inquiries routed to — an admin manager's
+// inbox, a shared business address, etc.) are deliberately separate. This
+// resolves which one to actually show/use, falling back to the sign-in
+// email only if no contact email was ever set.
+function centerContactEmail(center) {
+  return center?.contactEmail?.trim() || center?.email || "";
+}
 
 // -----------------------------------------------------------------------
 // READINESS SCORE ENGINE
@@ -1510,6 +1520,7 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
       contactName: center.contactName,
       phone: center.phone,
       email: center.email,
+      contactEmail: center.contactEmail,
       address: center.address,
       postalCode: center.postalCode,
       website: center.website,
@@ -1664,8 +1675,18 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
                 <Field label="Phone number" error={errors.phone}>
                   <input type="tel" value={center.phone} onChange={(e) => updateCenter("phone", e.target.value)} />
                 </Field>
-                <Field label="Email" error={errors.email}>
+                <Field
+                  label="Sign-in email (Gmail or Google Workspace)"
+                  error={errors.email}
+                  hint="Must be a real Google account — this is what you'll use to sign in later on Manage Listing. It doesn't have to be shown to anyone; use whichever email you'll remember."
+                >
                   <input type="email" value={center.email} onChange={(e) => updateCenter("email", e.target.value)} />
+                </Field>
+                <Field
+                  label="Contact email (optional)"
+                  hint="Where you'd like inquiries or admin correspondence sent — your business email, an admin manager's inbox, whatever suits you. Leave blank to just use your sign-in email above."
+                >
+                  <input type="email" value={center.contactEmail} onChange={(e) => updateCenter("contactEmail", e.target.value)} />
                 </Field>
                 <Field label="Address">
                   <input value={center.address} onChange={(e) => updateCenter("address", e.target.value)} />
@@ -1786,7 +1807,7 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
               <div className="sc-form-review-block">
                 <h3>{center.centerName || "Untitled center"}</h3>
                 <p className="sc-form-review-line">
-                  {center.contactName} · {center.phone} · {center.email}
+                  {center.contactName} · {center.phone} · {centerContactEmail(center)}
                 </p>
                 <p className="sc-form-review-line">
                   {center.address}
@@ -2309,13 +2330,15 @@ function AddClassroomSection({ center, existingCount, addListing, showToast }) {
 }
 
 function ManageCenterSection({ center, updateCenterInfo, showToast }) {
-  const [form, setForm] = useState(center);
+  const [form, setForm] = useState({ contactEmail: "", ...center });
   const update = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
 
   const save = async () => {
     await updateCenterInfo(center.id, {
       centerName: form.centerName,
       contactName: form.contactName,
+      phone: form.phone,
+      contactEmail: form.contactEmail,
       address: form.address,
       postalCode: form.postalCode,
       website: form.website,
@@ -2342,11 +2365,17 @@ function ManageCenterSection({ center, updateCenterInfo, showToast }) {
         <Field label="Contact person">
           <input value={form.contactName} onChange={(e) => update("contactName", e.target.value)} />
         </Field>
-        <Field label="Phone" hint="Used to look yourself up — contact us to change it.">
-          <input value={form.phone} disabled />
+        <Field label="Phone">
+          <input value={form.phone} onChange={(e) => update("phone", e.target.value)} />
         </Field>
-        <Field label="Email" hint="Used to look yourself up — contact us to change it.">
+        <Field label="Sign-in email" hint="This is what you sign in with via Google — contact us to change it.">
           <input value={form.email} disabled />
+        </Field>
+        <Field
+          label="Contact email (optional)"
+          hint="Where you'd like inquiries or admin correspondence sent — can be different from your sign-in email above. Leave blank to just use your sign-in email."
+        >
+          <input value={form.contactEmail} onChange={(e) => update("contactEmail", e.target.value)} />
         </Field>
         <Field label="Address">
           <input value={form.address} onChange={(e) => update("address", e.target.value)} />
@@ -2676,7 +2705,7 @@ function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, cent
               <div>
                 <div style={{ fontWeight: 700 }}>{c.centerName}</div>
                 <div style={{ color: COLORS.inkSoft }}>
-                  {c.contactName} · {c.phone}
+                  {c.contactName} · {c.phone} · {centerContactEmail(c)}
                 </div>
                 {c.strikes?.length > 0 && (
                   <div style={{ color: COLORS.danger, marginTop: 2 }}>
