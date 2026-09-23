@@ -558,6 +558,37 @@ export default function App() {
     try {
       const record = await insertInquiry(inquiry);
       setInquiries((prev) => [...prev, record]);
+
+      // Notify the center by email — best-effort. A failure here must never
+      // make the tutor think their inquiry didn't go through, since it did;
+      // this is purely a courtesy notification layered on top.
+      try {
+        const listing = listings.find((l) => l.id === inquiry.listingId);
+        const center = listing ? centers.find((c) => c.id === listing.centerId) : null;
+        const toEmail = center ? centerContactEmail(center) : null;
+        if (toEmail) {
+          await fetch("/.netlify/functions/send-inquiry-notification", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              toEmail,
+              centerName: center.centerName,
+              roomName: listing.roomName,
+              tutorName: record.tutorName,
+              tutorContact: record.tutorContact,
+              slots: record.slots,
+              date: record.date,
+              start: record.start,
+              durationHours: record.durationHours,
+              startDate: record.startDate,
+              commitmentLength: record.commitmentLength,
+              notes: record.notes,
+            }),
+          });
+        }
+      } catch (notifyErr) {
+        console.error("inquiry notification error", notifyErr);
+      }
     } catch (e) {
       console.error("addInquiry error", e);
       showToast("Could not save — please retry.");
