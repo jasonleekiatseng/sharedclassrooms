@@ -408,7 +408,7 @@ function Badge({ label, bg, fg }) {
 
 function Field({ label, children, hint, error }) {
   return (
-    <label style={{ display: "block", marginBottom: 14 }}>
+    <label style={{ display: "block", marginBottom: 14 }} data-has-error={error ? "true" : undefined}>
       <div style={{ fontSize: 12.5, fontWeight: 600, color: COLORS.inkSoft, marginBottom: 5 }}>{label}</div>
       {children}
       {hint && <div style={{ fontSize: 12, color: COLORS.inkSoft, marginTop: 4 }}>{hint}</div>}
@@ -1410,11 +1410,25 @@ function ClassroomFields({ classroom: c, errors: err, onUpdate, onToggleSchedule
 // ================= LIST YOUR SPACE =================
 const LIST_SPACE_DRAFT_KEY = "sc_list_space_draft_v1";
 
+const STEP0_FIELD_LABELS = { centerName: "Center name", contactName: "Contact name", phone: "Phone", email: "Sign-in email", postalCode: "Postal code" };
+const CLASSROOM_FIELD_LABELS = { capacity: "seats", schedule: "available days and times", pricePerHour: "price per hour", minBookingHours: "minimum booking (2 hours or more)" };
+
+// Scroll the first problem into view after React has re-rendered it.
+function scrollToFirstError() {
+  setTimeout(() => {
+    const el = document.querySelector("[data-has-error='true']");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 50);
+}
+
 function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
   const [step, setStep] = useState(0);
   const [center, setCenter] = useState(emptyCenterInfo);
   const [classrooms, setClassrooms] = useState([emptyClassroom()]);
   const [errors, setErrors] = useState({});
+  // Summary shown beside Continue when a step fails validation, so problems
+  // inside collapsed classroom cards are never invisible.
+  const [stepError, setStepError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [lastSubmitCount, setLastSubmitCount] = useState(0);
   const [foundDraft, setFoundDraft] = useState(null); // { center, classrooms, step, savedAt } or null
@@ -1536,7 +1550,16 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
     }
 
     setErrors(next);
-    return Object.keys(next).length === 0;
+    const missing = Object.keys(next);
+    if (missing.length) {
+      setStepError(
+        next.email && next.email !== "Required"
+          ? "This email is already registered — see the note under Sign-in email."
+          : `Please fill in: ${missing.map((f) => STEP0_FIELD_LABELS[f] || f).join(", ")}.`
+      );
+      scrollToFirstError();
+    }
+    return missing.length === 0;
   };
 
   const validateStep1 = () => {
@@ -1552,6 +1575,15 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
       if (Object.keys(e).length) next[c.id] = e;
     });
     setErrors(next);
+    if (Object.keys(next).length) {
+      // Open every classroom that has a problem so the red messages are visible.
+      setClassrooms((prev) => prev.map((c) => (next[c.id] ? { ...c, expanded: true } : c)));
+      const lines = classrooms
+        .map((c, idx) => (next[c.id] ? `${labelFor(idx)}: missing ${Object.keys(next[c.id]).map((f) => CLASSROOM_FIELD_LABELS[f] || f).join(", ")}` : null))
+        .filter(Boolean);
+      setStepError(lines.join(" · "));
+      scrollToFirstError();
+    }
     return Object.keys(next).length === 0;
   };
 
@@ -1559,10 +1591,14 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
     if (step === 0 && !validateStep0()) return;
     if (step === 1 && !validateStep1()) return;
     setErrors({});
+    setStepError("");
     setStep((s) => Math.min(s + 1, LIST_STEPS.length - 1));
   };
 
-  const goBack = () => setStep((s) => Math.max(s - 1, 0));
+  const goBack = () => {
+    setStepError("");
+    setStep((s) => Math.max(s - 1, 0));
+  };
 
   const handleFinalSubmit = async () => {
     // Flag (never auto-merge) a brand-new center whose address matches a
@@ -1831,10 +1867,11 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
               {classrooms.map((c, idx) => {
                 const err = errors[c.id] || {};
                 return (
-                  <div className="sc-form-card" key={c.id}>
+                  <div className="sc-form-card" key={c.id} data-has-error={Object.keys(err).length ? "true" : undefined}>
                     <button type="button" className="sc-form-card-head" onClick={() => toggleExpanded(c.id)}>
                       <span>
                         {labelFor(idx)}
+                        {Object.keys(err).length > 0 && <span className="sc-form-card-flag"> · Needs attention</span>}
                         {!c.expanded && c.capacity ? ` · Seats ${c.capacity}${c.pricePerHour ? ` · $${c.pricePerHour}/hr` : ""}` : ""}
                       </span>
                       <span className="sc-form-chevron">{c.expanded ? "–" : "+"}</span>
@@ -1903,6 +1940,12 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
                 visits in person to verify it.
               </p>
             </section>
+          )}
+
+          {stepError && (
+            <div className="sc-form-step-error" role="alert">
+              <strong>Can't continue yet.</strong> {stepError}
+            </div>
           )}
 
           <div className="sc-form-actions">
@@ -3041,6 +3084,8 @@ function ListFormStyle() {
         font-family: ${SANS};
       }
       .sc-form-actions .sc-form-btn { margin: 0 0 0 auto; }
+      .sc-form-step-error { margin-top: 20px; padding: 10px 14px; border-left: 3px solid ${COLORS.danger}; background: #FBEDEA; color: ${COLORS.danger}; font-size: 13.5px; line-height: 1.5; border-radius: 2px; }
+      .sc-form-card-flag { color: ${COLORS.danger}; font-weight: 600; font-size: 12.5px; }
       .sc-form-btn-ghost {
         background: none;
         border: 1px solid ${COLORS.line};
