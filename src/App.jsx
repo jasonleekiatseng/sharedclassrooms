@@ -189,6 +189,32 @@ function centerContactEmail(center) {
   return center?.contactEmail?.trim() || center?.email || "";
 }
 
+// Emails the SharedClassrooms admin that new listings are waiting for audit.
+// Best-effort: the listings are already saved, so a failed email is only
+// logged — it never shows the center an error.
+async function notifyAdminOfNewListing({ isNewCenter, center, roomNames, addressMatchWarning }) {
+  if (!roomNames.length) return;
+  try {
+    await fetch("/.netlify/functions/send-listing-notification", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        isNewCenter,
+        centerName: center.centerName,
+        contactName: center.contactName,
+        phone: center.phone,
+        contactEmail: centerContactEmail(center),
+        address: center.address,
+        postalCode: center.postalCode,
+        roomNames,
+        addressMatchWarning,
+      }),
+    });
+  } catch (e) {
+    console.error("listing notification error", e);
+  }
+}
+
 // -----------------------------------------------------------------------
 // READINESS SCORE ENGINE
 // -----------------------------------------------------------------------
@@ -489,7 +515,12 @@ function AmenityPicker({ amenities, onToggle }) {
 
 // ================= APP =================
 export default function App() {
-  const [tab, setTab] = useState("home");
+  // Email buttons link to e.g. sharedclassrooms.com/?tab=admin — honour that
+  // so the link lands on the right screen instead of Home.
+  const [tab, setTab] = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return ["home", "browse", "list", "manage", "admin"].includes(requested) ? requested : "home";
+  });
   const [centers, setCenters] = useState([]);
   const [listings, setListings] = useState([]);
   const [inquiries, setInquiries] = useState([]);
@@ -548,9 +579,11 @@ export default function App() {
     try {
       const record = await insertListing(listing);
       setListings((prev) => [...prev, record]);
+      return record;
     } catch (e) {
       console.error("addListing error", e);
       showToast("Could not save — please retry.");
+      return null;
     }
   };
 
@@ -1565,9 +1598,10 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
       marketingNotes: center.marketingNotes,
     });
 
+    const savedRooms = [];
     for (let idx = 0; idx < classrooms.length; idx++) {
       const c = classrooms[idx];
-      await addListing({
+      const saved = await addListing({
         centerId,
         roomName: labelFor(idx),
         capacity: c.capacity,
@@ -1584,6 +1618,11 @@ function ListSpace({ centers, listings, addCenter, addListing, showToast }) {
         readinessScoreAtSubmission: readiness.overall,
         addressMatchWarning,
       });
+      if (saved) savedRooms.push(labelFor(idx));
+    }
+
+    if (centerId) {
+      await notifyAdminOfNewListing({ isNewCenter: true, center, roomNames: savedRooms, addressMatchWarning });
     }
 
     showToast("Listing submitted — it'll go live once we've visited and verified the room.");
@@ -2298,7 +2337,7 @@ function AddClassroomSection({ center, existingCount, addListing, showToast }) {
     if (!validate()) return;
     setSaving(true);
     const readiness = computeReadiness(center, [classroom]);
-    await addListing({
+    const saved = await addListing({
       centerId: center.id,
       roomName: label,
       capacity: classroom.capacity,
@@ -2314,6 +2353,7 @@ function AddClassroomSection({ center, existingCount, addListing, showToast }) {
       photos: classroom.photos,
       readinessScoreAtSubmission: readiness.overall,
     });
+    if (saved) await notifyAdminOfNewListing({ isNewCenter: false, center, roomNames: [label] });
     setSaving(false);
     setClassroom(emptyClassroom());
     setErrors({});
@@ -2624,12 +2664,45 @@ function ManageListingSection({ listing, inquiries, setInquiryStatus, updateList
 
 // ================= ADMIN =================
 function Admin({ unlocked, pw, setPw, unlock, centers, listings, inquiries, centerById, setListingAudit, setCenterStanding }) {
+  const [showPw, setShowPw] = useState(false);
   if (!unlocked) {
     return (
       <div style={{ maxWidth: 320 }}>
         <h1 style={{ fontSize: 22, fontFamily: SERIF }}>Admin</h1>
         <Field label="Passcode">
-          <input type="password" style={inputStyle} value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && unlock()} />
+          <div style={{ position: "relative" }}>
+            <input
+              type={showPw ? "text" : "password"}
+              style={{ ...inputStyle, paddingRight: 64 }}
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && unlock()}
+              autoComplete="current-password"
+            />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                setShowPw((v) => !v);
+              }}
+              aria-label={showPw ? "Hide passcode" : "Show passcode"}
+              style={{
+                position: "absolute",
+                right: 6,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "transparent",
+                border: "none",
+                color: COLORS.inkSoft,
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: "pointer",
+                padding: "4px 6px",
+              }}
+            >
+              {showPw ? "Hide" : "Show"}
+            </button>
+          </div>
         </Field>
         <Button onClick={unlock}>Unlock</Button>
       </div>
